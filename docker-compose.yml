@@ -1,0 +1,68 @@
+services:
+  minio:
+    image: minio/minio
+    container_name: minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    networks:
+      - minio_network
+    ports:
+      - "9000:9000"   
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001" 
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: always  
+  postgres:
+    image: postgres
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DATABASE=${POSTGRES_DATABASE}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data/
+    networks:
+      - postgres_network  
+    healthcheck:
+      test: ["CMD", "pg_isready", "-p", "5432", "-U", "${POSTGRES_USER}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: always  
+  mlflow:
+    build: ./docker
+    container_name: mlflow
+    ports:
+      - "80:5000"
+    networks:
+      - minio_network
+      - postgres_network  
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command: mlflow server --backend-store-uri postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DATABASE} --default-artifact-root s3://mlflow/ --host 0.0.0.0   
+
+
+volumes:
+  minio-data:
+  postgres-data:
+networks:
+  minio_network:
+    driver: bridge
+  postgres_network:
+    driver: bridge
