@@ -1,0 +1,17 @@
+numpy
+pandas
+scikit-learn
+seaborn
+matplotlib
+scipy
+jupyter
+notebook
+ipython
+gdown
+torch
+torchvision
+gdown
+tqdm
+mlflow
+boto3
+python-dotenv

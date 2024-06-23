@@ -2,9 +2,10 @@ services:
   minio:
     image: minio/minio
     container_name: minio
+    restart: unless-stopped 
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY}
     networks:
       - minio_network
     ports:
@@ -18,16 +19,29 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    restart: always  
+  create_s3_buckets:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      until (/usr/bin/mc alias set minio http://minio:9000 '${AWS_ACCESS_KEY_ID}' '${AWS_SECRET_ACCESS_KEY}') do echo '...waiting...' && sleep 1; done;
+      /usr/bin/mc mb minio/${AWS_BUCKET_NAME};
+      exit 0;
+      "
+    networks:    
+      - minio_network
   postgres:
     image: postgres
     container_name: postgres
+    restart: unless-stopped 
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DATABASE=${POSTGRES_DATABASE}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE}
     volumes:
       - postgres-data:/var/lib/postgresql/data/
     networks:
@@ -37,26 +51,33 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    restart: always  
   mlflow:
-    build: ./docker
+    build: ./docker/mlflow
     container_name: mlflow
+    restart: unless-stopped 
     ports:
       - "80:5000"
     networks:
       - minio_network
       - postgres_network  
     environment:
-      MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
-      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
     depends_on:
       minio:
         condition: service_healthy
       postgres:
         condition: service_healthy
-    command: mlflow server --backend-store-uri postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DATABASE} --default-artifact-root s3://mlflow/ --host 0.0.0.0   
-
+    command: mlflow server --backend-store-uri postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DATABASE} --default-artifact-root s3://${AWS_BUCKET_NAME}/ --artifacts-destination s3://${AWS_BUCKET_NAME}/ --host 0.0.0.0   
+  # python:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/python/Dockerfile
+  #   container_name: python
+  #   volumes:
+  #     - .:/app
+  #   command: tail -f /dev/null
 
 volumes:
   minio-data:
