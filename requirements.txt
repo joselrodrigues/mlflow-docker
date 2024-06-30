@@ -15,3 +15,5 @@ tqdm
 mlflow
 boto3
 python-dotenv
+optuna
+optuna-dashboard
