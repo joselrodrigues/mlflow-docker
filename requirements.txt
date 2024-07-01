@@ -17,3 +17,4 @@ boto3
 python-dotenv
 optuna
 optuna-dashboard
+psycopg2-binary

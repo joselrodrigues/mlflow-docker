@@ -41,9 +41,12 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DATABASE: ${POSTGRES_DATABASE}
+      POSTGRES_DATABASE: ${POSTGRES_MLFLOW}
+      POSTGRES_MLFLOW: ${POSTGRES_MLFLOW}
+      POSTGRES_OPTUNA: ${POSTGRES_OPTUNA}
     volumes:
       - postgres-data:/var/lib/postgresql/data/
+      - ./entrypoint.sh:/docker-entrypoint-initdb.d/entrypoint.sh
     networks:
       - postgres_network  
     healthcheck:
@@ -69,19 +72,46 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-    command: mlflow server --backend-store-uri postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DATABASE} --default-artifact-root s3://${AWS_BUCKET_NAME}/ --artifacts-destination s3://${AWS_BUCKET_NAME}/ --host 0.0.0.0   
-  # python:
-  #   build:
-  #     context: .
-  #     dockerfile: docker/python/Dockerfile
-  #   container_name: python
-  #   volumes:
-  #     - .:/app
-  #   command: tail -f /dev/null
+    command: mlflow server --backend-store-uri postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_MLFLOW} --default-artifact-root s3://${AWS_BUCKET_NAME}/ --artifacts-destination s3://${AWS_BUCKET_NAME}/ --host 0.0.0.0   
+  initialize_optuna_db:
+    build:
+      context: .
+      dockerfile: docker/optuna/Dockerfile 
+    container_name: initialize_optuna_db
+    working_dir: /app
+    volumes:
+      - initialize-optuna-db:/var/log/
+    networks:
+      - postgres_network
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DATABASE: ${POSTGRES_OPTUNA} 
+    command: python initialize_optuna_db.py
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep 'Database initialized successfully' /var/log/initialize_optuna_db.log || exit 1"]
+      interval: 10s
+      retries: 5    
+  optuna_dashboard:
+    image: ghcr.io/optuna/optuna-dashboard
+    container_name: optuna_dashboard
+    entrypoint: >
+       /bin/bash -c "optuna-dashboard postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_OPTUNA} --host 0.0.0.0"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - initialize_optuna_db
+    networks:
+      - postgres_network
+    platform: linux/amd64  
 
 volumes:
   minio-data:
   postgres-data:
+  initialize-optuna-db:
 networks:
   minio_network:
     driver: bridge
